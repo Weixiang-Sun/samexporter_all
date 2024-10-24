@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    input_sizes = [(1024, 1024), (562, 471)]
+    input_size = (1024, 1024)
     multimask_output = True
     model_type = args.model_type
     if model_type == "sam2_hiera_tiny":
@@ -222,36 +222,34 @@ if __name__ == "__main__":
     sam2_model = build_sam2(model_cfg, args.checkpoint, device="cpu")
     full_model = SAM2FullModel(sam2_model, multimask_output=multimask_output).cpu()
 
-    for input_size in input_sizes:
-        # Dummy inputs for exporting
-        img = torch.randn(1, 3, input_size[0], input_size[1]).cpu()
-        point_coords = torch.randint(low=0, high=input_size[1], size=(1, 5, 2), dtype=torch.float)
-        point_labels = torch.randint(low=0, high=1, size=(1, 5), dtype=torch.float)
-        mask_input = torch.randn(1, 1, input_size[0]//4, input_size[1]//4, dtype=torch.float)
-        has_mask_input = torch.tensor([1], dtype=torch.float)
+    # Dummy inputs for exporting
+    img = torch.randn(1, 3, input_size[0], input_size[1]).cpu()
+    point_coords = torch.randint(low=0, high=input_size[1], size=(1, 5, 2), dtype=torch.float)
+    point_labels = torch.randint(low=0, high=1, size=(1, 5), dtype=torch.float)
+    mask_input = torch.randn(1, 1, input_size[0]//4, input_size[1]//4, dtype=torch.float)
+    has_mask_input = torch.tensor([1], dtype=torch.float)
 
-        output_file = args.output.replace(".onnx", f"_{input_size[0]}x{input_size[1]}.onnx")
-        pathlib.Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-        torch.onnx.export(
-            full_model,
-            (img, point_coords, point_labels, mask_input, has_mask_input),
-            output_file,
-            export_params=True,
-            opset_version=args.opset,
-            do_constant_folding=True,
-            input_names=["image", "point_coords", "point_labels", "mask_input", "has_mask_input"],
-            output_names=["masks", "iou_predictions"],
-            dynamic_axes={
-                "point_coords": {0: "num_labels", 1: "num_points"},
-                "point_labels": {0: "num_labels", 1: "num_points"},
-                "mask_input": {0: "num_labels"},
-                "has_mask_input": {0: "num_labels"},
-            },
-        )
-        print("Saved full model to", output_file)
-        print("Simplifying full model...")
-        onnx_model = onnx.load(output_file)
-        model_simp, check = simplify(onnx_model)
-        assert check, "Simplified ONNX model could not be validated"
-        onnx.save(model_simp, output_file)
-        print("Saved simplified full model to", output_file)
+    pathlib.Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(
+        full_model,
+        (img, point_coords, point_labels, mask_input, has_mask_input),
+        args.output,
+        export_params=True,
+        opset_version=args.opset,
+        do_constant_folding=True,
+        input_names=["image", "point_coords", "point_labels", "mask_input", "has_mask_input"],
+        output_names=["masks", "iou_predictions"],
+        dynamic_axes={
+            "point_coords": {0: "num_labels", 1: "num_points"},
+            "point_labels": {0: "num_labels", 1: "num_points"},
+            "mask_input": {0: "num_labels"},
+            "has_mask_input": {0: "num_labels"},
+        },
+    )
+    print("Saved full model to", args.output)
+    print("Simplifying full model...")
+    onnx_model = onnx.load(args.output)
+    model_simp, check = simplify(onnx_model)
+    assert check, "Simplified ONNX model could not be validated"
+    onnx.save(model_simp, args.output)
+    print("Saved simplified full model to", args.output)
